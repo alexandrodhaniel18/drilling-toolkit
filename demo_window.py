@@ -13,7 +13,7 @@ print('Jendela layak (m3/s):', res['window'])
 
 fig = plot_flow_window(res, 1200, 1300.0, 20.0e6, unit='gpm',
                        title='Jendela laju alir (data dummy)')
-fig.savefig('ecd_window.png', dpi=200, bbox_inches='tight')
+fig.savefig('outputs/ecd_window.png', dpi=200, bbox_inches='tight')
 
 import matplotlib.pyplot as plt
 plt.show()
