@@ -142,7 +142,7 @@ print(res['window'])    # (q_min, q_max) dalam m3/s, atau None
 
 - Sawaryn, S. J. & Thorogood, J. L. (2005). SPE 84246.
 - Taylor, H. L. & Mason, M. C. (1972). SPE 3362.
-- Bourgoyne, A. T. dkk. (1986). *Applied Drilling Engineering*. SPE Textbook Series.
+- Bourgoyne, A. T. (1986). *Applied Drilling Engineering*. SPE Textbook Series.
 - API RP 13D. *Rheology and Hydraulics of Oil-well Drilling Fluids*.
 - Moore, P. L. (1974). *Drilling Practices Manual*.
 
