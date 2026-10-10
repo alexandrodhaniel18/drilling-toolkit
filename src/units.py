@@ -46,3 +46,14 @@ def cp_to_pas(cp):
 
 def lbf100ft2_to_pa(x):
     return x * LBF100FT2_TO_PA
+
+GPM_TO_M3S = 6.30902e-5      # 1 gpm (galon AS per menit) dalam m3/s
+
+
+def gpm_to_m3s(gpm):
+    return gpm * GPM_TO_M3S
+
+
+def nozzle32_to_m(n):
+    """Ukuran nozzle dalam 1/32 inci (misal 13) menjadi diameter dalam m."""
+    return in_to_m(n / 32.0)

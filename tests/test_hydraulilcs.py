@@ -3,13 +3,16 @@ import pytest
 
 from src.hydraulics import (
     annulus_area, annulus_pressure_loss, bingham_dpdl_annulus,
-    bingham_dpdl_pipe, dpdl_annulus, dpdl_pipe, ecd, ecd_dynamic,
-    hydrostatic_pressure, mean_velocity, pipe_area, reynolds_annulus,
-    reynolds_pipe, turbulent_dpdl_annulus, turbulent_dpdl_pipe,
+    bingham_dpdl_pipe, bit_pressure_drop, dpdl_annulus, dpdl_pipe, ecd,
+    ecd_dynamic, hydraulic_power, hydrostatic_pressure, mean_velocity,
+    pipe_area, pipe_pressure_loss, pump_pressure, reynolds_annulus,
+    reynolds_pipe, total_flow_area, turbulent_dpdl_annulus,
+    turbulent_dpdl_pipe,
 )
 from src.units import (
-    FT_TO_M, G, PSI_TO_PA, cp_to_pas, ft_to_m, in_to_m, kgm3_to_ppg,
-    lbf100ft2_to_pa, pa_to_psi, ppg_to_kgm3, psi_to_pa,
+    FT_TO_M, G, PSI_TO_PA, cp_to_pas, ft_to_m, gpm_to_m3s, in_to_m,
+    kgm3_to_ppg, lbf100ft2_to_pa, nozzle32_to_m, pa_to_psi, ppg_to_kgm3,
+    psi_to_pa,
 )
 
 
@@ -180,3 +183,65 @@ def test_apl_and_ecd_invalid_inputs():
         annulus_pressure_loss(1200, 0.02, [(1000, 0.1, 0.12)], 0.02, 5.0)
     with pytest.raises(ValueError):
         ecd_dynamic(1200, 1.0e5, 0.0)                              # TVD nol
+
+def test_pipe_loss_laminar_hand_calc():
+    # rho 1200, q 0.005, ID 0.1086, L 1000, PV 0.025, YP 6
+    # v = 0.53978 ; dP/dL = 36.62 + 294.65 = 331.27 Pa/m
+    total, det = pipe_pressure_loss(1200, 0.005, [(1000, 0.1086)], 0.025, 6.0)
+    assert np.isclose(total, 331273.61, rtol=1e-6)
+    assert det[0]['regime'] == 'laminar'
+
+
+def test_pipe_loss_two_sections_turbulent():
+    secs = [(1000, 0.1086), (200, 0.0714)]       # drill pipe + drill collar
+    total, det = pipe_pressure_loss(1200, 0.03, secs, 0.025, 6.0)
+    assert [d['regime'] for d in det] == ['turbulent', 'turbulent']
+    assert np.isclose(det[0]['dp'], 1608572.54, rtol=1e-6)
+    assert np.isclose(det[1]['dp'], 2358282.40, rtol=1e-6)
+    assert np.isclose(total, 3966854.93, rtol=1e-6)
+
+
+def test_bit_pressure_drop_hand_calc():
+    # 1200*0.03^2 / (2*0.95^2*(4e-4)^2) = 1.08 / 2.888e-7 = 3.7396 MPa
+    assert np.isclose(bit_pressure_drop(1200, 0.03, 4.0e-4), 3739612.19, rtol=1e-6)
+
+
+def test_bit_drop_matches_field_formula():
+    # 10 ppg, 500 gpm, 3 nozzle 13/32. Lapangan: 8.311e-5*rho*Q^2/(Cd^2*At^2) psi
+    at_in2 = 3 * np.pi / 4 * (13 / 32) ** 2
+    field = 8.311e-5 * 10.0 * 500.0 ** 2 / (0.95 ** 2 * at_in2 ** 2)
+    tfa = total_flow_area([nozzle32_to_m(13)] * 3)
+    si = bit_pressure_drop(ppg_to_kgm3(10.0), gpm_to_m3s(500.0), tfa) / PSI_TO_PA
+    assert np.isclose(si, field, rtol=5e-3)
+
+
+def test_nozzle_and_tfa():
+    assert np.isclose(nozzle32_to_m(13), 0.0103188, atol=1e-6)
+    assert np.isclose(total_flow_area([nozzle32_to_m(13)] * 3), 2.5088e-4, rtol=1e-4)
+
+
+def test_pump_pressure_is_sum_of_parts():
+    pipe = [(1000, 0.1086), (200, 0.0714)]
+    ann = [(1000, 0.25, 0.127), (200, 0.25, 0.18)]
+    noz = [nozzle32_to_m(13)] * 3
+    r = pump_pressure(1200, 0.03, pipe, ann, noz, 0.025, 6.0, p_surface=1.0e5)
+    assert np.isclose(r['pipe'], 3966854.93, rtol=1e-6)
+    assert np.isclose(r['annulus'], 523032.15, rtol=1e-6)
+    assert np.isclose(r['bit'], 9506396.29, rtol=1e-6)
+    assert np.isclose(r['total'], 14096283.37, rtol=1e-6)
+    assert np.isclose(r['total'], r['surface'] + r['pipe'] + r['bit'] + r['annulus'])
+    assert np.isclose(r['bit'] / r['total'], 0.6744, atol=1e-4)
+
+
+def test_hydraulic_power():
+    assert np.isclose(hydraulic_power(14096283.37, 0.03), 422888.50, rtol=1e-6)
+    assert np.isclose(hydraulic_power(9506396.29, 0.03), 285191.89, rtol=1e-6)
+
+
+def test_bit_and_pipe_invalid_inputs():
+    with pytest.raises(ValueError):
+        total_flow_area([0.0103, 0.0])               # nozzle nol
+    with pytest.raises(ValueError):
+        bit_pressure_drop(1200, 0.03, 4.0e-4, cd=0.0)
+    with pytest.raises(ValueError):
+        pipe_pressure_loss(1200, 0.03, [], 0.025, 6.0)

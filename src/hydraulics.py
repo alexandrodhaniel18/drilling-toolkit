@@ -188,3 +188,65 @@ def ecd_dynamic(rho, apl, tvd):
     """ECD dinamis (kg/m3) = rho + APL/(g*TVD). apl dalam Pa, tvd dalam m."""
     tvd = float(_require_positive(tvd, 'tvd'))
     return rho + apl / (G * tvd)
+
+CD_BIT = 0.95                    # koefisien discharge nozzle (default API)
+
+
+def pipe_pressure_loss(rho, q, sections, pv, yp):
+    """Kehilangan tekanan di dalam drill string (Pa), segmen seri.
+
+    sections: daftar (panjang_m, d_dalam_m). Mengembalikan (total_Pa, rincian).
+    """
+    if len(sections) == 0:
+        raise ValueError('sections tidak boleh kosong')
+    total = 0.0
+    details = []
+    for length, d in sections:
+        length = float(_require_positive(length, 'length'))
+        v = float(mean_velocity(q, pipe_area(d)))
+        dpdl, regime = dpdl_pipe(rho, v, d, pv, yp)
+        dp = dpdl * length
+        total += dp
+        details.append({
+            'length': length,
+            'v': v,
+            're': float(reynolds_pipe(rho, v, d, pv, yp)),
+            'regime': regime,
+            'dpdl': dpdl,
+            'dp': dp,
+        })
+    return total, details
+
+
+def total_flow_area(nozzle_diameters):
+    """TFA (m2) dari daftar diameter nozzle (m)."""
+    d = _require_positive(nozzle_diameters, 'nozzle')
+    return float(np.sum(np.pi / 4 * d ** 2))
+
+
+def bit_pressure_drop(rho, q, tfa, cd=CD_BIT):
+    """Penurunan tekanan di nozzle bit (Pa) = rho*q^2 / (2*cd^2*tfa^2)."""
+    rho = _require_positive(rho, 'rho')
+    q = _require_positive(q, 'q')
+    tfa = _require_positive(tfa, 'tfa')
+    cd = _require_positive(cd, 'cd')
+    return rho * q ** 2 / (2.0 * cd ** 2 * tfa ** 2)
+
+
+def hydraulic_power(p, q):
+    """Daya hidrolik (W) = tekanan (Pa) x laju alir (m3/s)."""
+    return float(p) * float(_require_positive(q, 'q'))
+
+
+def pump_pressure(rho, q, pipe_sections, annulus_sections, nozzles,
+                  pv, yp, p_surface=0.0, cd=CD_BIT):
+    """Tekanan pompa total (Pa) dan rinciannya, dalam satu dict."""
+    p_pipe, pipe_det = pipe_pressure_loss(rho, q, pipe_sections, pv, yp)
+    p_ann, ann_det = annulus_pressure_loss(rho, q, annulus_sections, pv, yp)
+    tfa = total_flow_area(nozzles)
+    p_bit = float(bit_pressure_drop(rho, q, tfa, cd))
+    return {
+        'surface': p_surface, 'pipe': p_pipe, 'bit': p_bit, 'annulus': p_ann,
+        'total': p_surface + p_pipe + p_bit + p_ann, 'tfa': tfa,
+        'pipe_details': pipe_det, 'annulus_details': ann_det,
+    }
