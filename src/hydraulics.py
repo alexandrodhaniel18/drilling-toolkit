@@ -154,3 +154,37 @@ def dpdl_annulus(rho, v, d_hole, d_pipe, pv, yp):
     if reynolds_annulus(rho, v, d_hole, d_pipe, pv, yp) < RE_CRIT:
         return float(bingham_dpdl_annulus(v, d_hole, d_pipe, pv, yp)), 'laminar'
     return float(turbulent_dpdl_annulus(rho, v, d_hole, d_pipe, pv)), 'turbulent'
+
+def annulus_pressure_loss(rho, q, sections, pv, yp):
+    """Kehilangan tekanan annulus total (Pa) dari beberapa segmen seri.
+
+    rho: kg/m3; q: laju alir (m3/s); pv: Pa.s; yp: Pa.
+    sections: daftar (panjang_MD_m, d_hole_m, d_pipe_m), satu tuple per segmen.
+    Mengembalikan (total_Pa, rincian), rincian = daftar dict per segmen:
+    length, v, re, regime, dpdl, dp.
+    """
+    if len(sections) == 0:
+        raise ValueError('sections tidak boleh kosong')
+    total = 0.0
+    details = []
+    for length, d_hole, d_pipe in sections:
+        length = float(_require_positive(length, 'length'))
+        v = float(mean_velocity(q, annulus_area(d_hole, d_pipe)))
+        dpdl, regime = dpdl_annulus(rho, v, d_hole, d_pipe, pv, yp)
+        dp = dpdl * length
+        total += dp
+        details.append({
+            'length': length,
+            'v': v,
+            're': float(reynolds_annulus(rho, v, d_hole, d_pipe, pv, yp)),
+            'regime': regime,
+            'dpdl': dpdl,
+            'dp': dp,
+        })
+    return total, details
+
+
+def ecd_dynamic(rho, apl, tvd):
+    """ECD dinamis (kg/m3) = rho + APL/(g*TVD). apl dalam Pa, tvd dalam m."""
+    tvd = float(_require_positive(tvd, 'tvd'))
+    return rho + apl / (G * tvd)

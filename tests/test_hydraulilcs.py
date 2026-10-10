@@ -2,12 +2,11 @@ import numpy as np
 import pytest
 
 from src.hydraulics import (
-    annulus_area, bingham_dpdl_annulus, bingham_dpdl_pipe, dpdl_annulus,
-    dpdl_pipe, ecd, hydrostatic_pressure, mean_velocity, pipe_area,
-    reynolds_annulus, reynolds_pipe, turbulent_dpdl_annulus,
-    turbulent_dpdl_pipe,
+    annulus_area, annulus_pressure_loss, bingham_dpdl_annulus,
+    bingham_dpdl_pipe, dpdl_annulus, dpdl_pipe, ecd, ecd_dynamic,
+    hydrostatic_pressure, mean_velocity, pipe_area, reynolds_annulus,
+    reynolds_pipe, turbulent_dpdl_annulus, turbulent_dpdl_pipe,
 )
-
 from src.units import (
     FT_TO_M, G, PSI_TO_PA, cp_to_pas, ft_to_m, in_to_m, kgm3_to_ppg,
     lbf100ft2_to_pa, pa_to_psi, ppg_to_kgm3, psi_to_pa,
@@ -132,3 +131,52 @@ def test_regime_selection():
 def test_velocity_must_be_positive():
     with pytest.raises(ValueError):
         reynolds_pipe(1200, 0.0, 0.1, 0.02, 5.0)
+
+def test_apl_single_section_hand_calc():
+    # rho 1200, q 0.02, lubang 0.2, pipa 0.12 (celah 0.08), L 1000, PV 0.02, YP 5
+    # A = 0.020106 -> v = 0.99472 ; dP/dL = 149.2 + 375 = 524.208 Pa/m
+    total, det = annulus_pressure_loss(1200, 0.02, [(1000, 0.2, 0.12)], 0.02, 5.0)
+    assert np.isclose(total, 524207.76, rtol=1e-6)
+    assert det[0]['regime'] == 'laminar'
+    assert np.isclose(det[0]['dpdl'] * 1000, total)
+
+
+def test_apl_two_sections_sum():
+    secs = [(1000, 0.25, 0.127), (200, 0.25, 0.18)]
+    total, det = annulus_pressure_loss(1200, 0.03, secs, 0.025, 6.0)
+    assert np.isclose(det[0]['dp'], 358019.44, rtol=1e-6)
+    assert np.isclose(det[1]['dp'], 165012.71, rtol=1e-6)
+    assert np.isclose(total, det[0]['dp'] + det[1]['dp'])
+    assert [d['regime'] for d in det] == ['laminar', 'laminar']
+
+
+def test_apl_turbulent_sections():
+    secs = [(1000, 0.25, 0.127), (200, 0.25, 0.18)]
+    total, det = annulus_pressure_loss(1200, 0.08, secs, 0.025, 6.0)
+    assert [d['regime'] for d in det] == ['turbulent', 'turbulent']
+    assert np.isclose(total, 1674127.1, rtol=1e-6)
+
+
+def test_ecd_dynamic_hand_calc():
+    # rho 1200, APL 2 MPa, TVD 2000 m -> 1200 + 2e6/(G*2000)
+    assert np.isclose(ecd_dynamic(1200, 2.0e6, 2000), 1200 + 2.0e6 / (G * 2000))
+    assert np.isclose(ecd_dynamic(1200, 2.0e6, 2000), 1301.97, atol=0.01)
+    assert ecd_dynamic(1200, 0.0, 2000) == 1200       # tanpa gesekan, ECD = rho
+
+
+def test_ecd_dynamic_from_apl_in_ppg():
+    secs = [(1000, 0.25, 0.127), (200, 0.25, 0.18)]
+    total, _ = annulus_pressure_loss(1200, 0.03, secs, 0.025, 6.0)
+    e = ecd_dynamic(1200, total, 1200)
+    assert np.isclose(e, 1244.45, atol=0.01)
+    assert e > 1200                                    # ECD selalu >= densitas statis
+    assert np.isclose(kgm3_to_ppg(e), 1244.45 / 119.8264, rtol=1e-3)
+
+
+def test_apl_and_ecd_invalid_inputs():
+    with pytest.raises(ValueError):
+        annulus_pressure_loss(1200, 0.02, [], 0.02, 5.0)           # tanpa segmen
+    with pytest.raises(ValueError):
+        annulus_pressure_loss(1200, 0.02, [(1000, 0.1, 0.12)], 0.02, 5.0)
+    with pytest.raises(ValueError):
+        ecd_dynamic(1200, 1.0e5, 0.0)                              # TVD nol
