@@ -250,3 +250,73 @@ def pump_pressure(rho, q, pipe_sections, annulus_sections, nozzles,
         'total': p_surface + p_pipe + p_bit + p_ann, 'tfa': tfa,
         'pipe_details': pipe_det, 'annulus_details': ann_det,
     }
+
+CD_CUTTING = 1.5                 # koefisien hambat serpihan (rezim Newton)
+
+
+def slip_velocity(d_cut, rho_cut, rho, cd=CD_CUTTING):
+    """Kecepatan jatuh serpihan (m/s), rezim Newton, sumur vertikal.
+
+    d_cut: diameter serpihan (m); rho_cut, rho: densitas serpihan, lumpur (kg/m3).
+    """
+    d_cut = _require_positive(d_cut, 'd_cut')
+    rho = _require_positive(rho, 'rho')
+    cd = _require_positive(cd, 'cd')
+    rho_cut = np.asarray(rho_cut, dtype=float)
+    if np.any(rho_cut <= rho):
+        raise ValueError('rho_cut harus > rho')
+    return np.sqrt(4.0 * G * d_cut * (rho_cut - rho) / (3.0 * cd * rho))
+
+
+def transport_ratio(v_ann, v_slip):
+    """Rasio transport FT = 1 - v_slip/v_ann. Negatif berarti serpihan jatuh."""
+    v_ann = _require_positive(v_ann, 'v_ann')
+    return 1.0 - np.asarray(v_slip, dtype=float) / v_ann
+
+
+def min_flow_rate_hole_cleaning(rho, annulus_sections, d_cut, rho_cut,
+                                ft_min=0.5, cd=CD_CUTTING):
+    """Laju alir minimum (m3/s) agar FT >= ft_min di SEMUA segmen annulus."""
+    if not 0.0 < ft_min < 1.0:
+        raise ValueError('ft_min harus di antara 0 dan 1')
+    if len(annulus_sections) == 0:
+        raise ValueError('sections tidak boleh kosong')
+    v_slip = float(slip_velocity(d_cut, rho_cut, rho, cd))
+    v_min = v_slip / (1.0 - ft_min)
+    q_min = 0.0
+    for length, d_hole, d_pipe in annulus_sections:
+        q_min = max(q_min, v_min * float(annulus_area(d_hole, d_pipe)))
+    return q_min
+
+
+def flow_rate_window(rho, pipe_sections, annulus_sections, nozzles, pv, yp,
+                     tvd, ecd_max, p_max, d_cut, rho_cut, ft_min=0.5,
+                     p_surface=0.0, q_grid=None):
+    """Pindai laju alir dan tandai mana yang memenuhi tiga batas sekaligus.
+
+    ecd_max (kg/m3), p_max (Pa). Mengembalikan dict: q, ecd, p_pump, ft,
+    ok_clean, ok_ecd, ok_pump, ok, dan window = (q_min, q_max) atau None.
+    """
+    if not 0.0 < ft_min < 1.0:
+        raise ValueError('ft_min harus di antara 0 dan 1')
+    if q_grid is None:
+        q_grid = np.linspace(0.005, 0.100, 191)
+    q_grid = _require_positive(q_grid, 'q_grid')
+    v_slip = float(slip_velocity(d_cut, rho_cut, rho))
+    ecd_arr, p_arr, ft_arr = [], [], []
+    for q in q_grid:
+        r = pump_pressure(rho, q, pipe_sections, annulus_sections, nozzles,
+                          pv, yp, p_surface)
+        ecd_arr.append(ecd_dynamic(rho, r['annulus'], tvd))
+        p_arr.append(r['total'])
+        ft_arr.append(min(float(transport_ratio(d['v'], v_slip))
+                          for d in r['annulus_details']))
+    ecd_arr, p_arr, ft_arr = np.array(ecd_arr), np.array(p_arr), np.array(ft_arr)
+    ok_clean = ft_arr >= ft_min
+    ok_ecd = ecd_arr <= ecd_max
+    ok_pump = p_arr <= p_max
+    ok = ok_clean & ok_ecd & ok_pump
+    window = (float(q_grid[ok].min()), float(q_grid[ok].max())) if ok.any() else None
+    return {'q': q_grid, 'ecd': ecd_arr, 'p_pump': p_arr, 'ft': ft_arr,
+            'ok_clean': ok_clean, 'ok_ecd': ok_ecd, 'ok_pump': ok_pump,
+            'ok': ok, 'window': window}

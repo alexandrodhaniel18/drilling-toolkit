@@ -4,10 +4,11 @@ import pytest
 from src.hydraulics import (
     annulus_area, annulus_pressure_loss, bingham_dpdl_annulus,
     bingham_dpdl_pipe, bit_pressure_drop, dpdl_annulus, dpdl_pipe, ecd,
-    ecd_dynamic, hydraulic_power, hydrostatic_pressure, mean_velocity,
-    pipe_area, pipe_pressure_loss, pump_pressure, reynolds_annulus,
-    reynolds_pipe, total_flow_area, turbulent_dpdl_annulus,
-    turbulent_dpdl_pipe,
+    ecd_dynamic, flow_rate_window, hydraulic_power, hydrostatic_pressure,
+    mean_velocity, min_flow_rate_hole_cleaning, pipe_area,
+    pipe_pressure_loss, pump_pressure, reynolds_annulus, reynolds_pipe,
+    slip_velocity, total_flow_area, transport_ratio,
+    turbulent_dpdl_annulus, turbulent_dpdl_pipe,
 )
 from src.units import (
     FT_TO_M, G, PSI_TO_PA, cp_to_pas, ft_to_m, gpm_to_m3s, in_to_m,
@@ -245,3 +246,64 @@ def test_bit_and_pipe_invalid_inputs():
         bit_pressure_drop(1200, 0.03, 4.0e-4, cd=0.0)
     with pytest.raises(ValueError):
         pipe_pressure_loss(1200, 0.03, [], 0.025, 6.0)
+
+def test_slip_velocity_hand_calc():
+    # d 6 mm, rho_cut 2500, rho 1200, Cd 1.5:
+    # sqrt(4*9.80665*0.006*1300/(3*1.5*1200)) = 0.23803 m/s
+    assert np.isclose(slip_velocity(0.006, 2500, 1200), 0.23803, atol=1e-5)
+    # serpihan 2x lebih besar -> v_slip naik sqrt(2)
+    assert np.isclose(slip_velocity(0.012, 2500, 1200) / slip_velocity(0.006, 2500, 1200),
+                      np.sqrt(2.0))
+
+
+def test_transport_ratio():
+    assert np.isclose(transport_ratio(0.5, 0.2), 0.6)
+    assert np.isclose(transport_ratio(0.1, 0.2), -1.0)     # serpihan jatuh
+
+
+def test_min_flow_rate_hole_cleaning():
+    ann = [(1000, 0.25, 0.127), (200, 0.25, 0.18)]
+    q_min = min_flow_rate_hole_cleaning(1200, ann, 0.006, 2500, ft_min=0.5)
+    # v_min = 0.23803/0.5 = 0.47607 ; segmen terlebar A = 0.036420 -> 0.017338
+    assert np.isclose(q_min, 0.017338, rtol=1e-4)
+    v = q_min / annulus_area(0.25, 0.127)
+    assert np.isclose(transport_ratio(v, slip_velocity(0.006, 2500, 1200)), 0.5)
+
+
+def test_flow_rate_window_numbers():
+    pipe = [(1000, 0.1086), (200, 0.0714)]
+    ann = [(1000, 0.25, 0.127), (200, 0.25, 0.18)]
+    noz = [nozzle32_to_m(13)] * 3
+    r = flow_rate_window(1200, pipe, ann, noz, 0.025, 6.0, tvd=1200,
+                         ecd_max=1300.0, p_max=20.0e6, d_cut=0.006,
+                         rho_cut=2500, ft_min=0.5, p_surface=1.0e5)
+    q = r['q']
+    assert np.allclose(r['window'], (0.0175, 0.036))
+    assert np.isclose(q[r['ok_clean']].min(), 0.0175)      # batas bawah: hole cleaning
+    assert np.isclose(q[r['ok_ecd']].max(), 0.065)         # ECD baru mengikat di 0.065
+    assert np.isclose(q[r['ok_pump']].max(), 0.036)        # tekanan pompa yang mengikat
+    assert r['ecd'][r['ok']].max() <= 1300.0
+    assert r['p_pump'][r['ok']].max() <= 20.0e6
+    k = np.argmin(np.abs(q - 0.03))
+    assert np.isclose(r['ecd'][k], 1244.45, atol=0.01)
+    assert np.isclose(r['p_pump'][k], 14096283.37, rtol=1e-6)
+
+
+def test_flow_rate_window_none_when_pump_too_weak():
+    pipe = [(1000, 0.1086), (200, 0.0714)]
+    ann = [(1000, 0.25, 0.127), (200, 0.25, 0.18)]
+    r = flow_rate_window(1200, pipe, ann, [nozzle32_to_m(13)] * 3, 0.025, 6.0,
+                         tvd=1200, ecd_max=1300.0, p_max=1.0e6, d_cut=0.006,
+                         rho_cut=2500, ft_min=0.5, p_surface=1.0e5)
+    assert r['window'] is None
+
+
+def test_hole_cleaning_invalid_inputs():
+    with pytest.raises(ValueError):
+        slip_velocity(0.006, 1100, 1200)                   # serpihan lebih ringan
+    with pytest.raises(ValueError):
+        slip_velocity(0.0, 2500, 1200)
+    with pytest.raises(ValueError):
+        min_flow_rate_hole_cleaning(1200, [(1000, 0.25, 0.127)], 0.006, 2500, ft_min=1.0)
+    with pytest.raises(ValueError):
+        min_flow_rate_hole_cleaning(1200, [], 0.006, 2500)
