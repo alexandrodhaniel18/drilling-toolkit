@@ -29,3 +29,29 @@ def design_j_well(kop, dls, inc_final, azi, td, step=30.0, dls_length=30.0):
     azi_col = np.full_like(md, float(azi))
 
     return pd.DataFrame({'MD': md, 'INC': inc, 'AZI': azi_col})
+
+def design_s_well(kop, build_dls, inc_hold, drop_start, drop_dls, inc_end,
+                  azi, td, step=30.0, dls_length=30.0):
+    """Survei sintetis S-type: build dari kop, hold, lalu drop dari drop_start.
+
+    drop_start: MD mulai drop (m); drop_dls: laju drop (deg per dls_length);
+    inc_end: inklinasi setelah drop (deg, 0 = kembali vertikal).
+    """
+    if build_dls <= 0 or drop_dls <= 0:
+        raise ValueError('build_dls dan drop_dls harus > 0')
+    if not (0 <= inc_end < inc_hold <= 90):
+        raise ValueError('syarat: 0 <= inc_end < inc_hold <= 90')
+
+    eob = kop + inc_hold / build_dls * dls_length
+    eod = drop_start + (inc_hold - inc_end) / drop_dls * dls_length
+    if not (0 <= kop < eob < drop_start < eod < td):
+        raise ValueError('syarat: 0 <= kop < eob < drop_start < eod < td')
+
+    md = np.unique(np.concatenate(
+        (np.arange(0.0, td, step), [kop, eob, drop_start, eod, td])))
+    inc = np.interp(md,
+                    [kop, eob, drop_start, eod, td],
+                    [0.0, inc_hold, inc_hold, inc_end, inc_end])
+    azi_col = np.full_like(md, float(azi))
+
+    return pd.DataFrame({'MD': md, 'INC': inc, 'AZI': azi_col})
