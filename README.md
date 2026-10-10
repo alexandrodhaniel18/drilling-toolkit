@@ -115,7 +115,7 @@ res = flow_rate_window(1200, pipe, ann, nozzles, 0.025, 6.0,
 print(res['window'])    # (q_min, q_max) dalam m3/s, atau None
 ```
 
-![Jendela laju alir (data dummy)](outputs/demo_window.png)
+![Trajectory 3D](outputs/well_3d.png)
 
 ### Asumsi dan keterbatasan
 
