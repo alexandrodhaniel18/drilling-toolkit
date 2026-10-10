@@ -35,3 +35,14 @@ def in_to_m(inch):
 
 def gpm_to_m3s(gpm):
     return gpm * GPM_TO_M3S
+
+CP_TO_PAS = 1.0e-3           # 1 centipoise dalam Pa.s
+LBF100FT2_TO_PA = 0.4788026  # 1 lbf/100 ft2 dalam Pa
+
+
+def cp_to_pas(cp):
+    return cp * CP_TO_PAS
+
+
+def lbf100ft2_to_pa(x):
+    return x * LBF100FT2_TO_PA
