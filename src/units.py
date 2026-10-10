@@ -57,3 +57,28 @@ def gpm_to_m3s(gpm):
 def nozzle32_to_m(n):
     """Ukuran nozzle dalam 1/32 inci (misal 13) menjadi diameter dalam m."""
     return in_to_m(n / 32.0)
+
+LBF_TO_N = 4.4482216152605         # 1 lbf dalam N
+FTLBF_TO_NM = 1.3558179483314      # 1 ft.lbf dalam N.m
+FT_HR_TO_M_S = FT_TO_M / 3600.0    # 1 ft/jam dalam m/s
+M_HR_TO_M_S = 1.0 / 3600.0         # 1 m/jam dalam m/s
+
+
+def lbf_to_n(x):
+    return x * LBF_TO_N
+
+
+def ftlbf_to_nm(x):
+    return x * FTLBF_TO_NM
+
+
+def fthr_to_ms(x):
+    return x * FT_HR_TO_M_S
+
+
+def mhr_to_ms(x):
+    return x * M_HR_TO_M_S
+
+
+def rpm_to_rps(x):
+    return x / 60.0
