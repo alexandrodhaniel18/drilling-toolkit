@@ -114,3 +114,18 @@ def plot_mse_depth(depth, mse_pa, window=1, unit='mpa', title=None):
         ax.set_title(title)
     fig.tight_layout()
     return fig
+
+def plot_mse_intervals(depth, mse_pa, trend_pa, intervals, window=1,
+                       unit='mpa', title=None):
+    """Plot MSE vs kedalaman dengan tren dasar dan interval MSE tinggi diarsir."""
+    fig = plot_mse_depth(depth, mse_pa, window=window, unit=unit, title=title)
+    ax = fig.axes[0]
+    conv = 1.0e-6 if unit == 'mpa' else 1.0 / 6894.757293168
+    trend = np.asarray(trend_pa, dtype=float)
+    ax.plot(trend * conv, np.asarray(depth, dtype=float), color='tab:gray',
+            ls='--', lw=1.5, label='Tren dasar')
+    for i, iv in enumerate(intervals):
+        ax.axhspan(iv['start_depth'], iv['end_depth'], color='tab:red', alpha=0.15,
+                   label='Interval MSE tinggi' if i == 0 else None)
+    ax.legend(loc='best', fontsize=8)
+    return fig

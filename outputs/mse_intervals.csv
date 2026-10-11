@@ -1,0 +1,2 @@
+start_depth_m,end_depth_m,length_m,points,mse_median_MPa,trend_median_MPa,ratio_median,rotary_share_median
+1201.0,1230.0,29.0,29,658.85,192.26,3.44,0.998

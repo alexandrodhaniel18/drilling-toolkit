@@ -4,7 +4,6 @@ import numpy as np
 
 
 def _require_positive(x, name):
-    """Ubah ke array float dan tolak nilai <= 0."""
     x = np.asarray(x, dtype=float)
     if np.any(x <= 0):
         raise ValueError(f'{name} harus > 0')
@@ -12,7 +11,6 @@ def _require_positive(x, name):
 
 
 def _require_nonnegative(x, name):
-    """Ubah ke array float dan tolak nilai < 0 (nol diperbolehkan)."""
     x = np.asarray(x, dtype=float)
     if np.any(x < 0):
         raise ValueError(f'{name} tidak boleh negatif')
@@ -20,21 +18,15 @@ def _require_nonnegative(x, name):
 
 
 def bit_area(d_bit):
-    """Luas dasar lubang (m2) dari diameter bit d_bit (m)."""
     d_bit = _require_positive(d_bit, 'd_bit')
     return np.pi / 4.0 * d_bit ** 2
 
 
 def mse_axial(wob, d_bit):
-    """Suku aksial MSE (Pa) = WOB / A. wob dalam N."""
     return _require_nonnegative(wob, 'wob') / bit_area(d_bit)
 
 
 def mse_rotary(torque, rps, rop, d_bit):
-    """Suku rotari MSE (Pa) = 2*pi*N*T / (A*ROP).
-
-    torque: N.m; rps: putaran/detik; rop: m/s (harus > 0); d_bit: m.
-    """
     torque = _require_nonnegative(torque, 'torque')
     rps = _require_nonnegative(rps, 'rps')
     rop = _require_positive(rop, 'rop')
@@ -42,24 +34,21 @@ def mse_rotary(torque, rps, rop, d_bit):
 
 
 def mse(wob, torque, rps, rop, d_bit):
-    """MSE total (Pa), rumus Teale (1965). Semua masukan SI; array didukung."""
     return mse_axial(wob, d_bit) + mse_rotary(torque, rps, rop, d_bit)
 
 
 def mse_breakdown(wob, torque, rps, rop, d_bit):
-    """Rincian MSE: dict berisi axial, rotary, total (Pa), dan rotary_share."""
     axial = mse_axial(wob, d_bit)
     rotary = mse_rotary(torque, rps, rop, d_bit)
     total = axial + rotary
-    return {'axial': axial, 'rotary': rotary, 'total': total,
-            'rotary_share': rotary / total}
+    return {'axial': axial, 'rotary': rotary, 'total': total, 'rotary_share': rotary / total}
 
 
 def mse_efficiency(mse_value, ccs):
-    """Efisiensi mekanis = CCS / MSE (tanpa satuan). Keduanya dalam Pa."""
     mse_value = _require_positive(mse_value, 'mse')
     ccs = _require_positive(ccs, 'ccs')
     return ccs / mse_value
+
 
 # faktor ke SI: depth -> m, wob -> N, torque -> N.m, rpm -> putaran/detik, rop -> m/s
 UNIT_FACTORS = {
@@ -148,3 +137,88 @@ def rolling_median(x, window):
     padded = np.pad(x, half, mode='edge')
     windows = np.lib.stride_tricks.sliding_window_view(padded, window)
     return np.median(windows, axis=1)
+
+
+def baseline_trend(mse_values, window=101):
+    """Tren dasar MSE = median bergulir lebar (Pa), untuk pembanding.
+
+    window (ganjil) harus lebih dari 2x panjang anomali terpanjang yang ingin
+    dideteksi (dalam jumlah titik), kalau tidak anomali ikut menarik tren.
+    """
+    return rolling_median(mse_values, window)
+
+
+def find_high_mse_intervals(depth, mse_pa, trend, ratio=1.5, min_length=10.0,
+                            rotary_share=None):
+    """Cari interval kedalaman dengan MSE >= ratio x tren secara berurutan.
+
+    depth (m) harus naik. Titik berurutan yang lolos syarat digabung menjadi
+    satu interval; interval dibuang jika rentangnya (akhir - awal) < min_length (m).
+    rotary_share (opsional, array) menambah kolom median porsi rotari.
+    Mengembalikan daftar dict: start_depth, end_depth, length, points,
+    mse_median, trend_median, ratio_median, rotary_share_median (atau None).
+    """
+    depth = np.asarray(depth, dtype=float)
+    mse_pa = np.asarray(mse_pa, dtype=float)
+    trend = np.asarray(trend, dtype=float)
+    if not (depth.shape == mse_pa.shape == trend.shape) or depth.ndim != 1:
+        raise ValueError('depth, mse_pa, dan trend harus 1 dimensi sama panjang')
+    if rotary_share is not None:
+        rotary_share = np.asarray(rotary_share, dtype=float)
+        if rotary_share.shape != depth.shape:
+            raise ValueError('rotary_share harus sama panjang dengan depth')
+    if np.any(np.diff(depth) <= 0):
+        raise ValueError('depth harus naik (strictly increasing)')
+    if ratio <= 1.0:
+        raise ValueError('ratio harus > 1')
+    if min_length < 0:
+        raise ValueError('min_length tidak boleh negatif')
+    _require_positive(trend, 'trend')
+
+    rel = mse_pa / trend
+    flagged = rel >= ratio
+    intervals = []
+    i, n = 0, len(depth)
+    while i < n:
+        if not flagged[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and flagged[j + 1]:
+            j += 1
+        span = depth[j] - depth[i]
+        if span >= min_length:
+            sl = slice(i, j + 1)
+            intervals.append({
+                'start_depth': float(depth[i]),
+                'end_depth': float(depth[j]),
+                'length': float(span),
+                'points': int(j - i + 1),
+                'mse_median': float(np.median(mse_pa[sl])),
+                'trend_median': float(np.median(trend[sl])),
+                'ratio_median': float(np.median(rel[sl])),
+                'rotary_share_median': (None if rotary_share is None
+                                        else float(np.median(rotary_share[sl]))),
+            })
+        i = j + 1
+    return intervals
+
+
+def write_intervals_csv(intervals, path):
+    """Tulis tabel ringkasan interval ke CSV (MSE dalam MPa). Mengembalikan path."""
+    header = ['start_depth_m', 'end_depth_m', 'length_m', 'points',
+              'mse_median_MPa', 'trend_median_MPa', 'ratio_median',
+              'rotary_share_median']
+    with open(path, 'w', newline='', encoding='utf-8') as f:
+        w = csv.writer(f)
+        w.writerow(header)
+        for iv in intervals:
+            share = iv['rotary_share_median']
+            w.writerow([
+                f"{iv['start_depth']:.1f}", f"{iv['end_depth']:.1f}",
+                f"{iv['length']:.1f}", iv['points'],
+                f"{iv['mse_median'] / 1e6:.2f}", f"{iv['trend_median'] / 1e6:.2f}",
+                f"{iv['ratio_median']:.2f}",
+                '' if share is None else f'{share:.3f}',
+            ])
+    return path
