@@ -139,21 +139,32 @@ def turbulent_dpdl_annulus(rho, v, d_hole, d_pipe, pv):
     return 2.0 * _fanning_blasius(re) * rho * v ** 2 / d_eq
 
 
-def dpdl_pipe(rho, v, d, pv, yp):
-    """Gradien tekanan di pipa; rezim dipilih otomatis. Hanya untuk SKALAR.
+def _check_rheology(pv, yp):
+    """Validasi PV (> 0) dan YP (>= 0), dalam Pa.s dan Pa."""
+    if pv <= 0:
+        raise ValueError('pv harus > 0')
+    if yp < 0:
+        raise ValueError('yp harus >= 0')
 
-    Mengembalikan (dpdl dalam Pa/m, 'laminar' atau 'turbulent').
+
+def dpdl_pipe(rho, v, d, pv, yp):
+    """Gradien tekanan di pipa (Pa/m): yang lebih besar dari laminar dan turbulen.
+
+    Hanya untuk SKALAR. Kontinu dan naik terhadap v (tanpa lompatan di batas Re).
+    Mengembalikan (dpdl, 'laminar' atau 'turbulent').
     """
-    if reynolds_pipe(rho, v, d, pv, yp) < RE_CRIT:
-        return float(bingham_dpdl_pipe(v, d, pv, yp)), 'laminar'
-    return float(turbulent_dpdl_pipe(rho, v, d, pv)), 'turbulent'
+    _check_rheology(pv, yp)
+    lam = float(bingham_dpdl_pipe(v, d, pv, yp))
+    turb = float(turbulent_dpdl_pipe(rho, v, d, pv))
+    return (lam, 'laminar') if lam >= turb else (turb, 'turbulent')
 
 
 def dpdl_annulus(rho, v, d_hole, d_pipe, pv, yp):
-    """Gradien tekanan di annulus; rezim dipilih otomatis. Hanya untuk SKALAR."""
-    if reynolds_annulus(rho, v, d_hole, d_pipe, pv, yp) < RE_CRIT:
-        return float(bingham_dpdl_annulus(v, d_hole, d_pipe, pv, yp)), 'laminar'
-    return float(turbulent_dpdl_annulus(rho, v, d_hole, d_pipe, pv)), 'turbulent'
+    """Gradien tekanan di annulus (Pa/m): yang lebih besar dari laminar dan turbulen."""
+    _check_rheology(pv, yp)
+    lam = float(bingham_dpdl_annulus(v, d_hole, d_pipe, pv, yp))
+    turb = float(turbulent_dpdl_annulus(rho, v, d_hole, d_pipe, pv))
+    return (lam, 'laminar') if lam >= turb else (turb, 'turbulent')
 
 def annulus_pressure_loss(rho, q, sections, pv, yp):
     """Kehilangan tekanan annulus total (Pa) dari beberapa segmen seri.
@@ -185,9 +196,8 @@ def annulus_pressure_loss(rho, q, sections, pv, yp):
 
 
 def ecd_dynamic(rho, apl, tvd):
-    """ECD dinamis (kg/m3) = rho + APL/(g*TVD). apl dalam Pa, tvd dalam m."""
-    tvd = float(_require_positive(tvd, 'tvd'))
-    return rho + apl / (G * tvd)
+    """ECD dinamis (kg/m3). Alias dari ecd(); menerima skalar atau array."""
+    return ecd(rho, apl, tvd)
 
 CD_BIT = 0.95                    # koefisien discharge nozzle (default API)
 
@@ -294,8 +304,9 @@ def flow_rate_window(rho, pipe_sections, annulus_sections, nozzles, pv, yp,
                      p_surface=0.0, q_grid=None):
     """Pindai laju alir dan tandai mana yang memenuhi tiga batas sekaligus.
 
-    ecd_max (kg/m3), p_max (Pa). Mengembalikan dict: q, ecd, p_pump, ft,
-    ok_clean, ok_ecd, ok_pump, ok, dan window = (q_min, q_max) atau None.
+    Mengembalikan dict: q, ecd, p_pump, ft, ok_clean, ok_ecd, ok_pump, ok,
+    window = (q_min, q_max) atau None, dan contiguous (True bila semua titik
+    di dalam window memenuhi batas; False bila ada lubang di tengahnya).
     """
     if not 0.0 < ft_min < 1.0:
         raise ValueError('ft_min harus di antara 0 dan 1')
@@ -307,7 +318,7 @@ def flow_rate_window(rho, pipe_sections, annulus_sections, nozzles, pv, yp,
     for q in q_grid:
         r = pump_pressure(rho, q, pipe_sections, annulus_sections, nozzles,
                           pv, yp, p_surface)
-        ecd_arr.append(ecd_dynamic(rho, r['annulus'], tvd))
+        ecd_arr.append(float(ecd_dynamic(rho, r['annulus'], tvd)))
         p_arr.append(r['total'])
         ft_arr.append(min(float(transport_ratio(d['v'], v_slip))
                           for d in r['annulus_details']))
@@ -316,7 +327,9 @@ def flow_rate_window(rho, pipe_sections, annulus_sections, nozzles, pv, yp,
     ok_ecd = ecd_arr <= ecd_max
     ok_pump = p_arr <= p_max
     ok = ok_clean & ok_ecd & ok_pump
-    window = (float(q_grid[ok].min()), float(q_grid[ok].max())) if ok.any() else None
+    idx = np.flatnonzero(ok)
+    window = (float(q_grid[idx[0]]), float(q_grid[idx[-1]])) if idx.size else None
+    contiguous = bool(idx.size > 0 and idx[-1] - idx[0] + 1 == idx.size)
     return {'q': q_grid, 'ecd': ecd_arr, 'p_pump': p_arr, 'ft': ft_arr,
             'ok_clean': ok_clean, 'ok_ecd': ok_ecd, 'ok_pump': ok_pump,
-            'ok': ok, 'window': window}
+            'ok': ok, 'window': window, 'contiguous': contiguous}
