@@ -1,11 +1,12 @@
 # Drilling Toolkit
 
-Kumpulan modul Python untuk perhitungan teknik pemboran, dibangun bertahap dan diuji dengan `pytest`. Saat ini berisi dua bagian utama:
+Kumpulan modul Python untuk perhitungan teknik pemboran, dibangun bertahap dan diuji dengan `pytest`. Saat ini berisi tiga bagian utama:
 
-- **Trajectory**: trajectory sumur dari data survei dengan metode minimum curvature (TVD, Northing, Easting, DLS, vertical section, closure), lengkap dengan grafik 2D dan 3D.
+- **Trajectory**: desain profil sumur sintetis (tipe J dan S) dan trajectory dari data survei dengan metode minimum curvature (TVD, Northing, Easting, DLS, vertical section, closure), lengkap dengan grafik 2D dan 3D.
 - **Hidrolika lumpur**: tekanan hidrostatik, reologi Bingham, ECD statis dan dinamis, tekanan pompa, hole cleaning, dan jendela laju alir.
+- **MSE**: Mechanical Specific Energy dari parameter pemboran, pembacaan log CSV, penyaringan data, dan deteksi interval dengan MSE jauh di atas tren dasar.
 
-Status: trajectory dan hidrolika (tahap 2.1 sampai 2.6) selesai. Modul MSE belum dimulai.
+Status: trajectory, hidrolika (tahap 2.1 sampai 2.6), dan MSE (tahap 3.1 sampai 3.3) selesai. Semua contoh data bersifat sintetis. Penyambungan ke data lapangan belum dilakukan.
 
 ## Struktur
 
@@ -13,19 +14,29 @@ Status: trajectory dan hidrolika (tahap 2.1 sampai 2.6) selesai. Modul MSE belum
 drilling-toolkit/
 ├── src/
 │   ├── __init__.py
-│   ├── design.py        # (lengkapi: deskripsi singkat modul ini)
+│   ├── design.py        # profil sumur sintetis tipe J dan S (tabel MD, INC, AZI)
 │   ├── hydraulics.py    # hidrostatik, reologi, ECD, pompa, hole cleaning
-│   ├── plots.py         # plot trajectory dan jendela laju alir
+│   ├── mse.py           # MSE, pembaca CSV, filter, tren dasar, interval tinggi
+│   ├── plots.py         # plot trajectory, jendela laju alir, dan MSE
 │   ├── trajectory.py    # minimum curvature, DLS, vertical section, closure
 │   └── units.py         # konversi satuan lapangan <-> SI
 ├── tests/
 │   ├── test_design.py
 │   ├── test_hydraulics.py
-│   ├── test_plots.py
+│   ├── test_mse.py
+│   ├── test_mse_data.py
+│   ├── test_mse_intervals.py
+│   ├── test_plot.py
 │   └── test_trajectory.py
-├── outputs/             # gambar hasil (well_2d.png, well_3d.png, ecd_window.png)
+├── data/                # data masukan (dummy_drilling_log.csv adalah data sintetis)
+├── outputs/             # hasil: gambar (well_2d, well_3d, ecd_window, mse_depth,
+│                        #   mse_intervals) dan tabel (trajectory_result.csv,
+│                        #   mse_intervals.csv)
 ├── main.py              # contoh trajectory
 ├── demo_window.py       # contoh jendela laju alir
+├── make_dummy_log.py    # pembuat log pemboran sintetis
+├── demo_mse.py          # contoh MSE terhadap kedalaman
+├── demo_intervals.py    # contoh deteksi interval MSE tinggi
 ├── requirements.txt
 ├── pytest.ini
 └── README.md
@@ -37,13 +48,18 @@ drilling-toolkit/
     .venv\Scripts\Activate.ps1
     pip install -r requirements.txt
 
-    python main.py            # trajectory sumur contoh
-    python demo_window.py     # jendela laju alir (data dummy)
-    pytest                    # jalankan semua tes
+    python main.py              # trajectory sumur contoh
+    python demo_window.py       # jendela laju alir (data dummy)
+    python make_dummy_log.py    # membuat data/dummy_drilling_log.csv
+    python demo_mse.py          # MSE terhadap kedalaman (data dummy)
+    python demo_intervals.py    # interval MSE tinggi (data dummy)
+    pytest                      # jalankan semua tes
+
+Skrip demo yang membuat gambar menyimpannya ke `outputs/` lalu membuka jendela plot. Tutup jendela itu agar skrip selesai.
 
 ## Modul trajectory
 
-Menghitung trajectory sumur dari data survei dengan metode minimum curvature.
+Menghitung trajectory sumur dari data survei dengan metode minimum curvature. `src/design.py` membuat tabel survei sintetis (kolom MD, INC, AZI) untuk profil tipe J (kick-off, build, lalu hold) dan tipe S (build, hold, lalu drop).
 
 ### Persamaan
 
@@ -58,7 +74,7 @@ Inklinasi dari vertikal (deg), azimuth dari utara searah jarum jam (deg), MD dan
 
 ### Validasi
 
-8 tes: sumur vertikal, interval lurus, busur 90° (hasil harus sama dengan jari-jari), sifat fisik (MD >= TVD, jarak lurus <= MD), closure, vertical section, dan pembacaan CSV.
+8 tes trajectory: sumur vertikal, interval lurus, busur 90° (hasil harus sama dengan jari-jari), sifat fisik (MD >= TVD, jarak lurus <= MD), closure, vertical section, dan pembacaan CSV. 4 tes desain memeriksa profil J dan S.
 
 ### Contoh hasil
 
@@ -127,16 +143,69 @@ print(res['window'])    # (q_min, q_max) dalam m3/s, atau None
 - Pencarian jendela laju alir memakai pemindaian grid karena gesekan tidak mulus di batas rezim.
 - Data di tes dan di `demo_window.py` adalah data dummy, bukan data lapangan.
 
+## Modul MSE
+
+Menghitung Mechanical Specific Energy (MSE) dari parameter pemboran, membaca log CSV, menyaring baris yang bukan pemboran aktif, dan menandai interval dengan MSE jauh di atas tren dasar.
+
+### Persamaan
+
+- MSE (Teale, 1965) = WOB / A + 2π x N x T / (A x ROP)
+- A = π/4 x d_bit²; N dalam putaran/detik; T dalam N·m; ROP dalam m/s; hasil dalam Pa
+- Rumus lapangan (psi): WOB/A + 120π x N x T / (A x ROP), dengan N dalam rpm dan ROP dalam ft/jam. Konstanta 120π hanya konversi satuan dari rumus yang sama.
+- Efisiensi mekanis = CCS / MSE
+- Tren dasar = median bergulir lebar dari MSE. Interval ditandai jika MSE >= rasio x tren selama rentang minimum tertentu.
+
+### Fungsi (`src/mse.py`)
+
+| Tahap | Fungsi | Isi |
+|---|---|---|
+| 3.1 | `bit_area`, `mse_axial`, `mse_rotary`, `mse`, `mse_breakdown`, `mse_efficiency` | MSE total, suku aksial dan rotari, efisiensi mekanis |
+| 3.2 | `read_drilling_csv`, `filter_on_bottom`, `mse_series`, `rolling_median` | baca CSV (satuan wajib disebut, diubah ke SI), buang baris sambungan dan sel kosong, MSE per baris, median bergulir |
+| 3.2 | `plot_mse_depth` (di `src/plots.py`) | plot MSE terhadap kedalaman |
+| 3.3 | `baseline_trend`, `find_high_mse_intervals`, `write_intervals_csv` | tren dasar, interval MSE tinggi, tabel ringkasan CSV |
+| 3.3 | `plot_mse_intervals` (di `src/plots.py`) | plot dengan tren dasar dan interval diarsir |
+
+### Contoh
+
+```python
+from src.mse import (baseline_trend, filter_on_bottom, find_high_mse_intervals,
+                     mse_series, read_drilling_csv)
+from src.units import in_to_m
+
+columns = {'depth': 'depth_m', 'wob': 'wob_kN', 'torque': 'torque_kNm',
+           'rpm': 'rpm', 'rop': 'rop_mh'}
+units = {'depth': 'm', 'wob': 'kn', 'torque': 'knm', 'rpm': 'rpm', 'rop': 'm/h'}
+
+data, mask = filter_on_bottom(read_drilling_csv('data/dummy_drilling_log.csv', columns, units))
+m = mse_series(data, in_to_m(8.5))
+intervals = find_high_mse_intervals(data['depth'], m, baseline_trend(m, 101),
+                                    ratio=1.5, min_length=10.0)
+```
+
+![MSE terhadap kedalaman](outputs/mse_depth.png)
+![Interval MSE tinggi](outputs/mse_intervals.png)
+
+### Asumsi dan keterbatasan
+
+- Data di `data/dummy_drilling_log.csv` bersifat sintetis (dibuat oleh `make_dummy_log.py`), bukan data lapangan.
+- Torsi dan RPM permukaan dianggap sama dengan di bit. Di sumur miring, torsi permukaan lebih besar dari torsi bit karena gesekan drill string, sehingga MSE cenderung terhitung terlalu tinggi. Dengan motor downhole, RPM di bit juga berbeda.
+- Model MSE Teale tidak memasukkan hidrolika bit.
+- Satuan di CSV wajib disebut eksplisit saat membaca, supaya tidak salah tebak.
+- `filter_on_bottom` hanya menolak nilai tidak terhingga dan nilai di bawah batas minimum (bawaan 0). Kriteria pemboran aktif yang lebih ketat perlu disesuaikan dengan datanya.
+- Jendela tren harus lebih dari dua kali panjang anomali terpanjang (dalam titik); kalau tidak, anomali menarik tren dan tidak terdeteksi.
+- Interval yang ditandai hanyalah kandidat. Lonjakan MSE bisa berarti batuan keras, bit tumpul, founder, atau getaran, dan modul ini tidak bisa membedakannya tanpa data pembanding (litologi, CCS).
+- Ambang rasio 1,5 dan panjang minimum 10 m adalah pilihan awal, bukan standar.
+
 ## Konvensi umum
 
-- Hidrolika: satuan internal selalu SI (m, m3/s, Pa, kg/m3, Pa.s). Konversi hanya di `src/units.py`.
+- Hidrolika dan MSE: satuan internal selalu SI (m, m3/s, Pa, kg/m3, Pa.s, N, N.m). Konversi hanya di `src/units.py`, dan satuan data CSV wajib disebut saat membaca.
 - Trajectory: sudut dalam derajat, DLS dalam deg/30 m (lihat bagian trajectory).
-- Nama file tes harus `test_<modul>.py`, dan modul sumber harus bisa diimpor sebagai `src.<modul>`.
+- Nama file tes diawali `test_`, dan modul sumber harus bisa diimpor sebagai `src.<modul>`.
 - Setiap fungsi baru mendapat tes yang bisa dicek dengan hitungan manual dan, bila ada, dibandingkan dengan rumus lapangan.
 
 ## Validasi
 
-`pytest` menjalankan 55 tes: 4 desain, 8 trajectory, 39 hidrolika, dan 4 plot. Hasil yang diharapkan saat ini: 55 passed.
+`pytest` menjalankan 82 tes: 4 desain, 8 trajectory, 39 hidrolika, 4 plot, dan 27 MSE (10 inti, 9 data dan plot, 8 interval). Hasil yang diharapkan saat ini: 82 passed.
 
 ## Referensi
 
@@ -145,5 +214,6 @@ print(res['window'])    # (q_min, q_max) dalam m3/s, atau None
 - Bourgoyne, A. T. (1986). *Applied Drilling Engineering*. SPE Textbook Series.
 - API RP 13D. *Rheology and Hydraulics of Oil-well Drilling Fluids*.
 - Moore, P. L. (1974). *Drilling Practices Manual*.
+- Teale, R. (1965). The concept of specific energy in rock drilling. *International Journal of Rock Mechanics and Mining Sciences*, 2(1), 57-73.
 
 Cek edisi dan nomor halaman langsung di sumbernya sebelum dikutip di laporan.
