@@ -1,42 +1,50 @@
 # Drilling Toolkit
 
+![tests](https://github.com/alexandrodhaniel18/drilling-toolkit/actions/workflows/tests.yml/badge.svg)
+
 Kumpulan modul Python untuk perhitungan teknik pemboran, dibangun bertahap dan diuji dengan `pytest`. Saat ini berisi tiga bagian utama:
 
 - **Trajectory**: desain profil sumur sintetis (tipe J dan S) dan trajectory dari data survei dengan metode minimum curvature (TVD, Northing, Easting, DLS, vertical section, closure), lengkap dengan grafik 2D dan 3D.
-- **Hidrolika lumpur**: tekanan hidrostatik, reologi Bingham, ECD statis dan dinamis, tekanan pompa, hole cleaning, dan jendela laju alir.
+- **Hidrolika lumpur**: tekanan hidrostatik, reologi Bingham, ECD statis dan dinamis, tekanan pompa, hole cleaning, jendela laju alir, dan profil ECD sepanjang sumur yang memakai hasil trajectory (MD untuk gesekan, TVD untuk hidrostatik).
 - **MSE**: Mechanical Specific Energy dari parameter pemboran, pembacaan log CSV, penyaringan data, dan deteksi interval dengan MSE jauh di atas tren dasar.
 
-Status: trajectory, hidrolika (tahap 2.1 sampai 2.6), dan MSE (tahap 3.1 sampai 3.3) selesai. Semua contoh data bersifat sintetis. Penyambungan ke data lapangan belum dilakukan.
+Status: trajectory, hidrolika (tahap 2.1 sampai 2.7), dan MSE (tahap 3.1 sampai 3.3) selesai. Semua contoh data bersifat sintetis. Penyambungan ke data lapangan belum dilakukan.
 
 ## Struktur
 
 ```
 drilling-toolkit/
+├── .github/workflows/
+│   └── tests.yml            # menjalankan pytest otomatis di GitHub Actions
 ├── src/
 │   ├── __init__.py
-│   ├── design.py        # profil sumur sintetis tipe J dan S (tabel MD, INC, AZI)
-│   ├── hydraulics.py    # hidrostatik, reologi, ECD, pompa, hole cleaning
-│   ├── mse.py           # MSE, pembaca CSV, filter, tren dasar, interval tinggi
-│   ├── plots.py         # plot trajectory, jendela laju alir, dan MSE
-│   ├── trajectory.py    # minimum curvature, DLS, vertical section, closure
-│   └── units.py         # konversi satuan lapangan <-> SI
+│   ├── design.py            # profil sumur sintetis tipe J dan S (tabel MD, INC, AZI)
+│   ├── hydraulics.py        # hidrostatik, reologi, ECD, pompa, hole cleaning
+│   ├── well_hydraulics.py   # profil ECD sepanjang sumur dari hasil trajectory
+│   ├── mse.py               # MSE, pembaca CSV, filter, tren dasar, interval tinggi
+│   ├── plots.py             # plot trajectory, jendela laju alir, dan MSE
+│   ├── trajectory.py        # minimum curvature, DLS, vertical section, closure
+│   └── units.py             # konversi satuan lapangan <-> SI
 ├── tests/
 │   ├── test_design.py
 │   ├── test_hydraulics.py
+│   ├── test_regime_monotonic.py
+│   ├── test_well_hydraulics.py
 │   ├── test_mse.py
 │   ├── test_mse_data.py
 │   ├── test_mse_intervals.py
 │   ├── test_plot.py
 │   └── test_trajectory.py
-├── data/                # data masukan (dummy_drilling_log.csv adalah data sintetis)
-├── outputs/             # hasil: gambar (well_2d, well_3d, ecd_window, mse_depth,
-│                        #   mse_intervals) dan tabel (trajectory_result.csv,
-│                        #   mse_intervals.csv)
-├── main.py              # contoh trajectory
-├── demo_window.py       # contoh jendela laju alir
-├── make_dummy_log.py    # pembuat log pemboran sintetis
-├── demo_mse.py          # contoh MSE terhadap kedalaman
-├── demo_intervals.py    # contoh deteksi interval MSE tinggi
+├── data/                    # data masukan (dummy_drilling_log.csv adalah data sintetis)
+├── outputs/                 # hasil: gambar (well_2d, well_3d, ecd_window, ecd_profile,
+│                            #   mse_depth, mse_intervals) dan tabel (trajectory_result.csv,
+│                            #   mse_intervals.csv)
+├── main.py                  # contoh trajectory
+├── demo_window.py           # contoh jendela laju alir
+├── demo_ecd_profile.py      # contoh profil ECD sepanjang sumur
+├── make_dummy_log.py        # pembuat log pemboran sintetis
+├── demo_mse.py              # contoh MSE terhadap kedalaman
+├── demo_intervals.py        # contoh deteksi interval MSE tinggi
 ├── requirements.txt
 ├── pytest.ini
 └── README.md
@@ -48,12 +56,13 @@ drilling-toolkit/
     .venv\Scripts\Activate.ps1
     pip install -r requirements.txt
 
-    python main.py              # trajectory sumur contoh
-    python demo_window.py       # jendela laju alir (data dummy)
-    python make_dummy_log.py    # membuat data/dummy_drilling_log.csv
-    python demo_mse.py          # MSE terhadap kedalaman (data dummy)
-    python demo_intervals.py    # interval MSE tinggi (data dummy)
-    pytest                      # jalankan semua tes
+    python main.py                # trajectory sumur contoh
+    python demo_window.py         # jendela laju alir (data dummy)
+    python demo_ecd_profile.py    # profil ECD sepanjang sumur (data dummy)
+    python make_dummy_log.py      # membuat data/dummy_drilling_log.csv
+    python demo_mse.py            # MSE terhadap kedalaman (data dummy)
+    python demo_intervals.py      # interval MSE tinggi (data dummy)
+    pytest                        # jalankan semua tes
 
 Skrip demo yang membuat gambar menyimpannya ke `outputs/` lalu membuka jendela plot. Tutup jendela itu agar skrip selesai.
 
@@ -87,20 +96,21 @@ Model deterministik: tanpa ketidakpastian survei (ellipse of uncertainty). Data 
 
 ## Modul hidrolika
 
-Semua fungsi di `src/hydraulics.py` memakai satuan SI. Konversi dari satuan lapangan ada di `src/units.py`.
+Semua fungsi di `src/hydraulics.py` dan `src/well_hydraulics.py` memakai satuan SI. Konversi dari satuan lapangan ada di `src/units.py`.
 
 ### Fungsi
 
 | Tahap | Fungsi | Isi |
 |---|---|---|
-| 2.1 | `hydrostatic_pressure`, `ecd` | tekanan hidrostatik dan ECD statis |
+| 2.1 | `hydrostatic_pressure`, `ecd` | tekanan hidrostatik dan ECD (skalar atau array) |
 | 2.2a | `pipe_area`, `annulus_area`, `mean_velocity` | luas penampang dan kecepatan rata-rata |
 | 2.2b | `bingham_dpdl_pipe`, `bingham_dpdl_annulus` | gradien tekanan Bingham, aliran laminar |
-| 2.2c | `reynolds_pipe`, `reynolds_annulus`, `turbulent_dpdl_*`, `dpdl_pipe`, `dpdl_annulus` | Reynolds, gesekan turbulen, pemilihan rezim otomatis |
-| 2.3 | `annulus_pressure_loss`, `ecd_dynamic` | kehilangan tekanan annulus multi-segmen dan ECD dinamis |
+| 2.2c | `reynolds_pipe`, `reynolds_annulus`, `turbulent_dpdl_*`, `dpdl_pipe`, `dpdl_annulus` | Reynolds (untuk pelaporan), gesekan turbulen, gradien tekanan = nilai yang lebih besar antara laminar dan turbulen |
+| 2.3 | `annulus_pressure_loss`, `ecd_dynamic` | kehilangan tekanan annulus multi-segmen dan ECD dinamis (`ecd_dynamic` adalah alias dari `ecd`) |
 | 2.4 | `pipe_pressure_loss`, `total_flow_area`, `bit_pressure_drop`, `hydraulic_power`, `pump_pressure` | tekanan pipa, nozzle bit, dan tekanan pompa total |
-| 2.5 | `slip_velocity`, `transport_ratio`, `min_flow_rate_hole_cleaning`, `flow_rate_window` | hole cleaning dan jendela laju alir |
+| 2.5 | `slip_velocity`, `transport_ratio`, `min_flow_rate_hole_cleaning`, `flow_rate_window` | hole cleaning dan jendela laju alir (hasil menyertakan flag `contiguous`) |
 | 2.6 | `plot_flow_window` (di `src/plots.py`) | plot ECD, tekanan pompa, dan rasio transport |
+| 2.7 | `ecd_profile` (di `src/well_hydraulics.py`) | ECD di setiap stasiun survei dari tabel trajectory |
 
 ### Persamaan utama
 
@@ -109,6 +119,7 @@ Semua fungsi di `src/hydraulics.py` memakai satuan SI. Konversi dari satuan lapa
 - Viskositas efektif: pipa μe = PV + YP x D / (6 x v); annulus μe = PV + YP x celah / (8 x v)
 - Reynolds: pipa Re = ρ x v x D / μe; annulus Re = ρ x v x (0,8165 x celah) / μe
 - Turbulen (Blasius): f = 0,0791 / Re^0,25; dP/dL = 2 x f x ρ x v² / D (annulus: D diganti 0,8165 x celah, Re memakai PV)
+- Gradien tekanan yang dipakai: dP/dL = maks(laminar, turbulen). Hasilnya kontinu dan naik terhadap kecepatan (lihat `tests/test_regime_monotonic.py`).
 - ECD dinamis: ECD = ρ + APL / (g x TVD). Gesekan memakai MD, hidrostatik memakai TVD.
 - Bit: ΔP = ρ x Q² / (2 x Cd² x TFA²), Cd = 0,95
 - Kecepatan jatuh serpihan: v_slip = √(4 x g x d x (ρ_serpih - ρ) / (3 x Cd x ρ)), Cd serpihan = 1,5
@@ -128,20 +139,46 @@ nozzles = [nozzle32_to_m(13)] * 3
 res = flow_rate_window(1200, pipe, ann, nozzles, 0.025, 6.0,
                        tvd=1200, ecd_max=1300.0, p_max=20.0e6,
                        d_cut=0.006, rho_cut=2500, ft_min=0.5, p_surface=1.0e5)
-print(res['window'])    # (q_min, q_max) dalam m3/s, atau None
+print(res['window'])        # (q_min, q_max) dalam m3/s, atau None
+print(res['contiguous'])    # True bila semua titik di dalam window memenuhi batas
 ```
 
 ![Jendela laju alir (data dummy)](outputs/ecd_window.png)
 
+### Hidrolika sepanjang sumur
+
+`ecd_profile` menggabungkan trajectory dengan hidrolika. Gesekan annulus bergantung pada panjang lintasan (MD), sedangkan tekanan hidrostatik bergantung pada kedalaman vertikal (TVD). Di sumur miring MD lebih panjang dari TVD, sehingga ECD pada MD yang sama lebih tinggi daripada di sumur vertikal.
+
+APL di kedalaman MD_i dihitung dari jumlah (gradien tekanan x panjang interval di atas MD_i), lalu ECD_i = ρ + APL_i / (g x TVD_i).
+
+```python
+from src.design import design_j_well
+from src.trajectory import minimum_curvature
+from src.well_hydraulics import ecd_profile
+
+design = design_j_well(kop=500, dls=3, inc_final=45, azi=45, td=2000)
+survey = minimum_curvature(design['MD'], design['INC'], design['AZI'])
+
+# (MD atas, MD bawah, d lubang atau ID casing, d pipa), semuanya dalam m, dari permukaan ke bawah
+intervals = [(0.0, 800.0, 0.22, 0.127),
+             (800.0, 2000.0, 0.2159, 0.127)]
+
+prof = ecd_profile(survey, rho=1200.0, q=0.03, intervals=intervals, pv=0.025, yp=6.0)
+print(prof[['MD', 'TVD', 'APL', 'ECD']].tail(1))   # baris TD
+```
+
+![Profil ECD (data dummy)](outputs/ecd_profile.png)
+
 ### Asumsi dan keterbatasan
 
 - Model reologi Bingham Plastic, dengan pendekatan celah sempit untuk annulus.
-- Batas laminar/turbulen memakai Re = 2100 (penyederhanaan). Kurva gesekan melompat sedikit di batas itu. Metode bilangan Hedstrom bisa memperhalusnya.
+- Pemilihan rezim aliran memakai nilai yang lebih besar antara gradien laminar (Bingham) dan turbulen (Blasius), bukan batas Re tetap. Ini menghilangkan lompatan gesekan di batas rezim, tetapi titik pergantiannya adalah hasil perpotongan kedua kurva dan belum divalidasi terhadap contoh API RP 13D. Metode bilangan Hedstrom atau Power Law adalah alternatif yang lebih baku.
 - Gesekan turbulen memakai korelasi Blasius (dinding halus). Kehilangan tekanan di tool joint, eksentrisitas pipa, dan model Power Law belum dihitung.
 - Hole cleaning hanya untuk sumur vertikal (rezim Newton). Hasilnya konservatif di laju rendah. Sumur miring perlu model lain.
 - Batas rasio transport (default 0,5) adalah aturan praktis, bukan hukum.
-- Pencarian jendela laju alir memakai pemindaian grid karena gesekan tidak mulus di batas rezim.
-- Data di tes dan di `demo_window.py` adalah data dummy, bukan data lapangan.
+- Pencarian jendela laju alir memakai pemindaian grid. Hasilnya menyertakan `contiguous` agar rentang yang berlubang tidak dilaporkan sebagai satu jendela.
+- Profil ECD: laju alir dan sifat lumpur dianggap seragam di seluruh sumur; TVD antar stasiun diinterpolasi linear (cukup akurat bila stasiun rapat); diameter pipa konstan per interval (drill collar atau HWDP bisa ditambahkan sebagai interval terpisah); efek suhu tidak dimodelkan.
+- Data di tes dan di `demo_window.py` serta `demo_ecd_profile.py` adalah data dummy, bukan data lapangan.
 
 ## Modul MSE
 
@@ -202,10 +239,11 @@ intervals = find_high_mse_intervals(data['depth'], m, baseline_trend(m, 101),
 - Trajectory: sudut dalam derajat, DLS dalam deg/30 m (lihat bagian trajectory).
 - Nama file tes diawali `test_`, dan modul sumber harus bisa diimpor sebagai `src.<modul>`.
 - Setiap fungsi baru mendapat tes yang bisa dicek dengan hitungan manual dan, bila ada, dibandingkan dengan rumus lapangan.
+- Tes tidak hanya memeriksa nilai tunggal, tetapi juga sifat fisik yang harus selalu benar (misalnya gesekan naik terhadap kecepatan, MD >= TVD).
 
 ## Validasi
 
-`pytest` menjalankan 82 tes: 4 desain, 8 trajectory, 39 hidrolika, 4 plot, dan 27 MSE (10 inti, 9 data dan plot, 8 interval). Hasil yang diharapkan saat ini: 82 passed.
+`pytest` menjalankan 98 tes: 4 desain, 8 trajectory, 39 hidrolika, 10 rezim aliran (monoton dan batas rezim), 6 hidrolika sepanjang sumur, 4 plot, dan 27 MSE (10 inti, 9 data dan plot, 8 interval). Hasil yang diharapkan saat ini: 98 passed. Tes yang sama berjalan otomatis di GitHub Actions pada setiap push (lihat badge di atas).
 
 ## Referensi
 
