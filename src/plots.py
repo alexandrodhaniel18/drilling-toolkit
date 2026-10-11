@@ -80,3 +80,37 @@ def plot_flow_window(res, rho, ecd_max, p_max, ft_min=0.5, unit='lps', title=Non
         ax_e.set_title(title)
     fig.tight_layout()
     return fig
+
+def plot_mse_depth(depth, mse_pa, window=1, unit='mpa', title=None):
+    """Plot MSE terhadap kedalaman (sumbu kedalaman ke bawah).
+
+    depth: m; mse_pa: Pa. window: ganjil; >1 menambah garis median bergulir.
+    unit: 'mpa' atau 'psi'. Mengembalikan fig.
+    """
+    from src.mse import rolling_median
+    depth = np.asarray(depth, dtype=float)
+    mse_pa = np.asarray(mse_pa, dtype=float)
+    if depth.shape != mse_pa.shape:
+        raise ValueError('depth dan mse_pa harus sama panjang')
+    if unit == 'mpa':
+        conv, xlabel = 1.0e-6, 'MSE (MPa)'
+    elif unit == 'psi':
+        conv, xlabel = 1.0 / 6894.757293168, 'MSE (psi)'
+    else:
+        raise ValueError("unit harus 'mpa' atau 'psi'")
+    x = mse_pa * conv
+
+    fig, ax = plt.subplots(figsize=(5, 8))
+    ax.plot(x, depth, color='tab:blue', alpha=0.35, lw=1, label='MSE')
+    if window > 1:
+        ax.plot(rolling_median(x, window), depth, color='tab:blue', lw=2,
+                label=f'Median bergulir ({window} titik)')
+    ax.invert_yaxis()
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel('Kedalaman (m)')
+    ax.grid(alpha=0.3)
+    ax.legend(loc='best', fontsize=8)
+    if title:
+        ax.set_title(title)
+    fig.tight_layout()
+    return fig
